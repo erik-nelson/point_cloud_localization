@@ -1,0 +1,14 @@
+localization:
+  # Do a prerejective RANSAC step during ICP. Reject correspondences greater
+  # than this distance.
+  ransac_thresh: 0.5
+
+  # Stop ICP if the transformation from the last iteration was this small.
+  tf_epsilon: 0.0000001
+
+  # During ICP, two points won't be considered a correspondence if they are
+  # not at least this far from one another.
+  corr_dist: 0.5
+
+  # Iterate ICP this many times.
+  iterations: 10
