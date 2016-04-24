@@ -116,6 +116,13 @@ class PointCloudLocalization {
     // Iterate ICP this many times.
     unsigned int iterations;
   } params_;
+
+  // Maximum acceptable translation and rotation tolerances. If
+  // transform_thresholding_ is set to false, neither of these thresholds are
+  // considered.
+  bool transform_thresholding_;
+  double max_translation_;
+  double max_rotation_;
 };
 
 #endif

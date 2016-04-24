@@ -46,6 +46,12 @@ namespace gu = geometry_utils;
 namespace gr = gu::ros;
 namespace pu = parameter_utils;
 
+using pcl::copyPointCloud;
+using pcl::GeneralizedIterativeClosestPoint;
+using pcl::PointCloud;
+using pcl::PointXYZ;
+using pcl::transformPointCloud;
+
 PointCloudLocalization::PointCloudLocalization() {}
 PointCloudLocalization::~PointCloudLocalization() {}
 
@@ -88,6 +94,9 @@ bool PointCloudLocalization::LoadParameters(const ros::NodeHandle& n) {
   if (!pu::Get("localization/tf_epsilon", params_.tf_epsilon)) return false;
   if (!pu::Get("localization/corr_dist", params_.corr_dist)) return false;
   if (!pu::Get("localization/iterations", params_.iterations)) return false;
+
+  if (!pu::Get("localization/max_translation", max_translation_)) return false;
+  if (!pu::Get("localization/max_rotation", max_rotation_)) return false;
 
   return true;
 }
@@ -164,7 +173,18 @@ bool PointCloudLocalization::MeasurementUpdate(const PointCloud::Ptr& query,
                                   T(1, 0), T(1, 1), T(1, 2),
                                   T(2, 0), T(2, 1), T(2, 2));
 
-  incremental_estimate_ = gu::PoseUpdate(incremental_estimate_, pose_update);
+  // Only update if the transform is small enough.
+  if (!transform_thresholding_ ||
+      (pose_update.translation.Norm() <= max_translation_ &&
+       pose_update.rotation.ToEulerZYX().Norm() <= max_rotation_)) {
+    incremental_estimate_ = gu::PoseUpdate(incremental_estimate_, pose_update);
+  } else {
+    ROS_WARN(
+        " %s: Discarding incremental transformation with norm (t: %lf, r: %lf)",
+        name_.c_str(), pose_update.translation.Norm(),
+        pose_update.rotation.ToEulerZYX().Norm());
+  }
+
   integrated_estimate_ =
       gu::PoseUpdate(integrated_estimate_, incremental_estimate_);
 
