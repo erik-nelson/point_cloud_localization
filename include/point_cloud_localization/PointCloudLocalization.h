@@ -53,9 +53,15 @@ class PointCloudLocalization {
   // Calls LoadParameters and RegisterCallbacks. Fails on failure of either.
   bool Initialize(const ros::NodeHandle& n);
 
-  // Transform a point cloud into the current localization estimate frame.
-  bool TransformPointsToBaseFrame(const PointCloud& points,
-                                  PointCloud* points_transformed) const;
+  // Transform a point cloud from the sensor frame into the fixed frame using
+  // the current best position estimate.
+  bool TransformPointsToFixedFrame(const PointCloud& points,
+                                   PointCloud* points_transformed) const;
+
+  // Transform a point cloud from the fixed frame into the sensor frame using
+  // the current best position estimate.
+  bool TransformPointsToSensorFrame(const PointCloud& points,
+                                    PointCloud* points_transformed) const;
 
   // Store incremental estimate from odometry.
   bool MotionUpdate(const geometry_utils::Transform3& incremental_odom);
@@ -75,9 +81,13 @@ class PointCloudLocalization {
   bool LoadParameters(const ros::NodeHandle& n);
   bool RegisterCallbacks(const ros::NodeHandle& n);
 
+  // Publish reference, query, and aligned query point clouds.
+  void PublishPoints(const PointCloud& points,
+                     const ros::Publisher& pub) const;
+
   // Publish incremental and integrated pose estimates.
   void PublishPose(const geometry_utils::Transform3& pose,
-                   const ros::Publisher& pub);
+                   const ros::Publisher& pub) const;
 
   // The node's name.
   std::string name_;
@@ -87,6 +97,9 @@ class PointCloudLocalization {
   geometry_utils::Transform3 integrated_estimate_;
 
   // Publishers.
+  ros::Publisher reference_pub_;
+  ros::Publisher query_pub_;
+  ros::Publisher aligned_pub_;
   ros::Publisher incremental_estimate_pub_;
   ros::Publisher integrated_estimate_pub_;
 
@@ -102,10 +115,6 @@ class PointCloudLocalization {
 
   // Parameters for filtering and ICP.
   struct Parameters {
-    // Do a prerejective RANSAC step during ICP. Reject correspondences greater
-    // than this distance.
-    double ransac_thresh;
-
     // Stop ICP if the transformation from the last iteration was this small.
     double tf_epsilon;
 

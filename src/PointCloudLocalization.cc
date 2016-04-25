@@ -90,7 +90,6 @@ bool PointCloudLocalization::LoadParameters(const ros::NodeHandle& n) {
   integrated_estimate_.rotation = gu::Rot3(init_roll, init_pitch, init_yaw);
 
   // Load algorithm parameters.
-  if (!pu::Get("localization/ransac_thresh", params_.ransac_thresh)) return false;
   if (!pu::Get("localization/tf_epsilon", params_.tf_epsilon)) return false;
   if (!pu::Get("localization/corr_dist", params_.corr_dist)) return false;
   if (!pu::Get("localization/iterations", params_.iterations)) return false;
@@ -105,10 +104,25 @@ bool PointCloudLocalization::RegisterCallbacks(const ros::NodeHandle& n) {
   // Create a local nodehandle to manage callback subscriptions.
   ros::NodeHandle nl(n);
 
+  query_pub_ = nl.advertise<PointCloud>("localization_query_points", 10, false);
+  reference_pub_ =
+      nl.advertise<PointCloud>("localization_reference_points", 10, false);
+  aligned_pub_ =
+      nl.advertise<PointCloud>("localization_aligned_points", 10, false);
+  incremental_estimate_pub_ = nl.advertise<geometry_msgs::PoseStamped>(
+      "localization_incremental_estimate", 10, false);
   integrated_estimate_pub_ = nl.advertise<geometry_msgs::PoseStamped>(
       "localization_integrated_estimate", 10, false);
 
   return true;
+}
+
+const gu::Transform3& PointCloudLocalization::GetIncrementalEstimate() const {
+  return incremental_estimate_;
+}
+
+const gu::Transform3& PointCloudLocalization::GetIntegratedEstimate() const {
+  return integrated_estimate_;
 }
 
 bool PointCloudLocalization::MotionUpdate(
@@ -118,7 +132,7 @@ bool PointCloudLocalization::MotionUpdate(
   return true;
 }
 
-bool PointCloudLocalization::TransformPointsToBaseFrame(
+bool PointCloudLocalization::TransformPointsToFixedFrame(
     const PointCloud& points, PointCloud* points_transformed) const {
   if (points_transformed == NULL) {
     ROS_ERROR("%s: Output is null.", name_.c_str());
@@ -129,6 +143,29 @@ bool PointCloudLocalization::TransformPointsToBaseFrame(
   // integrated estimate, and transform the incoming point cloud.
   const gu::Transform3 estimate =
       gu::PoseUpdate(integrated_estimate_, incremental_estimate_);
+  const Eigen::Matrix<double, 3, 3> R = estimate.rotation.Eigen();
+  const Eigen::Matrix<double, 3, 1> T = estimate.translation.Eigen();
+
+  Eigen::Matrix4d tf;
+  tf.block(0, 0, 3, 3) = R;
+  tf.block(0, 3, 3, 1) = T;
+
+  pcl::transformPointCloud(points, *points_transformed, tf);
+
+  return true;
+}
+
+bool PointCloudLocalization::TransformPointsToSensorFrame(
+    const PointCloud& points, PointCloud* points_transformed) const {
+  if (points_transformed == NULL) {
+    ROS_ERROR("%s: Output is null.", name_.c_str());
+    return false;
+  }
+
+  // Compose the current incremental estimate (from odometry) with the
+  // integrated estimate, then invert to go from world to sensor frame.
+  const gu::Transform3 estimate = gu::PoseInverse(
+      gu::PoseUpdate(integrated_estimate_, incremental_estimate_));
   const Eigen::Matrix<double, 3, 3> R = estimate.rotation.Eigen();
   const Eigen::Matrix<double, 3, 1> T = estimate.translation.Eigen();
 
@@ -155,7 +192,6 @@ bool PointCloudLocalization::MeasurementUpdate(const PointCloud::Ptr& query,
   // ICP-based alignment. Generalized ICP does (roughly) plane-to-plane
   // matching, and is much more robust than standard ICP.
   pcl::GeneralizedIterativeClosestPoint<pcl::PointXYZ, pcl::PointXYZ> icp;
-  icp.setRANSACOutlierRejectionThreshold(params_.ransac_thresh);
   icp.setTransformationEpsilon(params_.tf_epsilon);
   icp.setMaxCorrespondenceDistance(params_.corr_dist);
   icp.setMaximumIterations(params_.iterations);
@@ -163,10 +199,13 @@ bool PointCloudLocalization::MeasurementUpdate(const PointCloud::Ptr& query,
   icp.setInputSource(query);
   icp.setInputTarget(reference);
 
-  icp.align(*aligned_query);
+  PointCloud unused;
+  icp.align(unused);
 
   // Retrieve transformation and estimate and update.
   const Eigen::Matrix4f T = icp.getFinalTransformation();
+  pcl::transformPointCloud(*query, *aligned_query, T);
+
   gu::Transform3 pose_update;
   pose_update.translation = gu::Vec3(T(0, 3), T(1, 3), T(2, 3));
   pose_update.rotation = gu::Rot3(T(0, 0), T(0, 1), T(0, 2),
@@ -189,8 +228,14 @@ bool PointCloudLocalization::MeasurementUpdate(const PointCloud::Ptr& query,
       gu::PoseUpdate(integrated_estimate_, incremental_estimate_);
 
   // Convert pose estimates to ROS format and publish.
-  PublishPose(incremental_estimate_, incremental_estimate_pub_);
+  // PublishPose(incremental_estimate_, incremental_estimate_pub_);
+  PublishPose(pose_update, incremental_estimate_pub_);
   PublishPose(integrated_estimate_, integrated_estimate_pub_);
+
+  // Publish point clouds for visualization.
+  PublishPoints(*query, query_pub_);
+  PublishPoints(*reference, reference_pub_);
+  PublishPoints(*aligned_query, aligned_pub_);
 
   // Publish transform between fixed frame and localization frame.
   geometry_msgs::TransformStamped tf;
@@ -203,8 +248,19 @@ bool PointCloudLocalization::MeasurementUpdate(const PointCloud::Ptr& query,
   return true;
 }
 
+void PointCloudLocalization::PublishPoints(const PointCloud& points,
+                                           const ros::Publisher& pub) const {
+  // Check for subscribers before doing any work.
+  if (pub.getNumSubscribers() > 0) {
+    PointCloud out;
+    out = points;
+    out.header.frame_id = base_frame_id_;
+    pub.publish(out);
+  }
+}
+
 void PointCloudLocalization::PublishPose(const gu::Transform3& pose,
-                                         const ros::Publisher& pub) {
+                                         const ros::Publisher& pub) const {
   // Check for subscribers before doing any work.
   if (pub.getNumSubscribers() == 0)
    return;
@@ -212,7 +268,7 @@ void PointCloudLocalization::PublishPose(const gu::Transform3& pose,
   // Convert from gu::Transform3 to ROS's PoseStamped type and publish.
   geometry_msgs::PoseStamped ros_pose;
   ros_pose.pose = gr::ToRosPose(pose);
-  ros_pose.header.frame_id = base_frame_id_;
+  ros_pose.header.frame_id = fixed_frame_id_;
   ros_pose.header.stamp = stamp_;
   pub.publish(ros_pose);
 }
