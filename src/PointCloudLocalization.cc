@@ -46,7 +46,6 @@ namespace gu = geometry_utils;
 namespace gr = gu::ros;
 namespace pu = parameter_utils;
 
-using pcl::copyPointCloud;
 using pcl::GeneralizedIterativeClosestPoint;
 using pcl::PointCloud;
 using pcl::PointXYZ;
@@ -191,10 +190,12 @@ bool PointCloudLocalization::MeasurementUpdate(const PointCloud::Ptr& query,
 
   // ICP-based alignment. Generalized ICP does (roughly) plane-to-plane
   // matching, and is much more robust than standard ICP.
-  pcl::GeneralizedIterativeClosestPoint<pcl::PointXYZ, pcl::PointXYZ> icp;
+  GeneralizedIterativeClosestPoint<pcl::PointXYZ, pcl::PointXYZ> icp;
   icp.setTransformationEpsilon(params_.tf_epsilon);
   icp.setMaxCorrespondenceDistance(params_.corr_dist);
   icp.setMaximumIterations(params_.iterations);
+  icp.setRANSACIterations(0);
+  icp.setMaximumOptimizerIterations(50); // default 20
 
   icp.setInputSource(query);
   icp.setInputTarget(reference);
@@ -228,8 +229,7 @@ bool PointCloudLocalization::MeasurementUpdate(const PointCloud::Ptr& query,
       gu::PoseUpdate(integrated_estimate_, incremental_estimate_);
 
   // Convert pose estimates to ROS format and publish.
-  // PublishPose(incremental_estimate_, incremental_estimate_pub_);
-  PublishPose(pose_update, incremental_estimate_pub_);
+  PublishPose(incremental_estimate_, incremental_estimate_pub_);
   PublishPose(integrated_estimate_, integrated_estimate_pub_);
 
   // Publish point clouds for visualization.
