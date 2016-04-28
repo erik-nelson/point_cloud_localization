@@ -76,6 +76,11 @@ class PointCloudLocalization {
   const geometry_utils::Transform3& GetIncrementalEstimate() const;
   const geometry_utils::Transform3& GetIntegratedEstimate() const;
 
+  // Set integrated estimate. Useful for graph SLAM whenever the pose graph is
+  // updated and the map is regenerated.
+  void SetIntegratedEstimate(
+      const geometry_utils::Transform3& integrated_estimate);
+
  private:
   // Node initialization.
   bool LoadParameters(const ros::NodeHandle& n);

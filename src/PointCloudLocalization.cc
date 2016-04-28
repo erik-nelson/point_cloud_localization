@@ -124,6 +124,19 @@ const gu::Transform3& PointCloudLocalization::GetIntegratedEstimate() const {
   return integrated_estimate_;
 }
 
+void PointCloudLocalization::SetIntegratedEstimate(
+    const gu::Transform3& integrated_estimate) {
+  integrated_estimate_ = integrated_estimate;
+
+  // Publish transform between fixed frame and localization frame.
+  geometry_msgs::TransformStamped tf;
+  tf.transform = gr::ToRosTransform(integrated_estimate_);
+  tf.header.stamp = stamp_;
+  tf.header.frame_id = fixed_frame_id_;
+  tf.child_frame_id = base_frame_id_;
+  tfbr_.sendTransform(tf);
+}
+
 bool PointCloudLocalization::MotionUpdate(
     const gu::Transform3& incremental_odom) {
   // Store the incremental transform from odometry.
