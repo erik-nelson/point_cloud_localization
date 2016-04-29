@@ -93,6 +93,8 @@ bool PointCloudLocalization::LoadParameters(const ros::NodeHandle& n) {
   if (!pu::Get("localization/corr_dist", params_.corr_dist)) return false;
   if (!pu::Get("localization/iterations", params_.iterations)) return false;
 
+  if (!pu::Get("localization/transform_thresholding", transform_thresholding_))
+    return false;
   if (!pu::Get("localization/max_translation", max_translation_)) return false;
   if (!pu::Get("localization/max_rotation", max_rotation_)) return false;
 
